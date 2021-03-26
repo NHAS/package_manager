@@ -1,0 +1,26 @@
+{
+	"oauth_token": "<GITHUB OAUTH Public repo read token>",
+	"replacements": {
+		"build_dir": "build",
+		"cross_compiler": "arm-unknown-linux-gnueabi",
+		"ld_loc": "/tmp/root/lib"
+	},
+	"packages": {
+		"openssl": {
+			"repo":"https://github.com/openssl/openssl",
+			"configure_opts": "CROSS_COMPILE=$cross_compiler$- ./Configure -DL_ENDIAN --prefix=$build_dir$ linux-armv4",
+			"install": true
+		},
+		"openssh": {
+			
+			"repo":"https://github.com/openssh/openssh-portable",
+			"configure_opts": "autoreconf; LDFLAGS='-Wl,--rpath=$ld_loc$ -Wl,--dynamic-linker=$ld_loc$/ld-linux.so.3' ./configure --host=$cross_compiler$ --with-ssl-dir=$build_dir$ --with-zlib=$build_dir$",
+			"depends": ["openssl", "zlib"]
+		},		
+		"zlib": {
+			"repo":"https://github.com/madler/zlib",
+			"configure_opts": "CC=$cross_compiler$-gcc ./configure --prefix=$build_dir$",
+			"install": true
+		}
+	}
+}
