@@ -1,5 +1,5 @@
 pkg.json
-package_manager
+build_manager
 build/*
 source/*
 cache/*
