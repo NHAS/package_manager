@@ -10,6 +10,7 @@ func createOrder(packages []*Package) (order []*Package, err error) {
 	packageMap := make(map[string]*Package)
 	for _, v := range packages {
 		packageMap[v.Name] = v
+
 	}
 
 	fullGraph := make(map[string]*PackageNode, len(packages))
@@ -39,6 +40,11 @@ func createOrder(packages []*Package) (order []*Package, err error) {
 }
 
 func build(name string, packages map[string]*Package, graph map[string]*PackageNode) int {
+	if _, ok := packages[name]; !ok {
+
+		return 0
+	}
+
 	if _, ok := graph[name]; ok {
 		return graph[name].Priority
 	}

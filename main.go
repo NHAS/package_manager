@@ -41,8 +41,8 @@ type Management struct {
 
 func main() {
 
-	flag.Bool("no_configure", false, "Dont configure")
-	flag.Bool("no_build", false, "Dont build")
+	flag.Bool("configure", false, "Just configure, no build")
+	flag.Bool("build", false, "Just build, dont reconfigure the package")
 	flag.Bool("clean", false, "Delete everything and start again")
 
 	flag.Parse()
@@ -51,16 +51,16 @@ func main() {
 	clean := false
 	flag.Visit(func(f *flag.Flag) {
 		switch f.Name {
-		case "no_configure", "nc":
-			configure = false
-		case "no_build", "nb":
+		case "configure":
 			build = false
+		case "build":
+			configure = false // Yes these appear around the wrong way, except that when you just want to build you dont configure. And when you just want to configure you dont build
 		case "clean":
 			clean = true
 		}
 	})
 
-	if len(flag.Args()) != 1 {
+	if len(flag.Args()) < 1 {
 		fmt.Println("Enter pkg file path")
 		return
 	}
@@ -72,7 +72,7 @@ func main() {
 		return
 	}
 
-	pkgFile, err := ioutil.ReadFile(os.Args[1])
+	pkgFile, err := ioutil.ReadFile(flag.Args()[0])
 	check(err)
 
 	var settings Management
@@ -81,6 +81,25 @@ func main() {
 
 	if len(settings.OauthToken) == 0 {
 		log.Fatal("No ouath token specified")
+	}
+
+	if len(flag.Args()) == 2 {
+		var singleBuild *Package = nil
+		for i := range settings.Packages {
+			if strings.TrimSpace(settings.Packages[i].Name) == strings.TrimSpace(flag.Args()[1]) {
+				singleBuild = settings.Packages[i]
+				break
+			}
+		}
+
+		if singleBuild == nil {
+			fmt.Printf("Package %s not found\n", flag.Args()[1])
+			return
+		}
+
+		fmt.Printf("Building single package [%s] (This may not work if the packages dependancies have not been build)\n", singleBuild.Name)
+		settings.Packages = []*Package{singleBuild}
+
 	}
 
 	os.Mkdir("source", 0700)
