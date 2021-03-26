@@ -4,12 +4,17 @@ import (
 	"container/heap"
 )
 
-func createOrder(packages map[string]*Package) (order []*Package, err error) {
+func createOrder(packages []*Package) (order []*Package, err error) {
 	order = make([]*Package, len(packages))
 
+	packageMap := make(map[string]*Package)
+	for _, v := range packages {
+		packageMap[v.Name] = v
+	}
+
 	fullGraph := make(map[string]*PackageNode, len(packages))
-	for k := range packages {
-		build(k, packages, fullGraph)
+	for k := range packageMap {
+		build(k, packageMap, fullGraph)
 	}
 
 	pq := make(PriorityQueue, len(packages))
@@ -27,7 +32,7 @@ func createOrder(packages map[string]*Package) (order []*Package, err error) {
 
 	for i := 0; i < len(order); i++ {
 		item := heap.Pop(&pq).(*Item)
-		order[i] = packages[item.value.Name]
+		order[i] = packageMap[item.value.Name]
 	}
 
 	return order, nil

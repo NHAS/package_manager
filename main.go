@@ -3,9 +3,6 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
-	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,21 +10,14 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"log"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
-	"path"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-
-	"github.com/shurcooL/githubv4"
-	"golang.org/x/oauth2"
 )
 
-const validSourcesPath = "./source/valid_sources"
+const sourceCacheFile = "./source/valid_sources"
 
 func check(err error) {
 	if err != nil {
@@ -44,9 +34,9 @@ type Package struct {
 }
 
 type Management struct {
-	BuildReplacements map[string]string   `json:"replacements"`
-	OauthToken        string              `json:"oauth_token"`
-	Packages          map[string]*Package `json:"packages"`
+	BuildReplacements map[string]string `json:"replacements"`
+	OauthToken        string            `json:"oauth_token"`
+	Packages          []*Package        `json:"packages"`
 }
 
 func main() {
@@ -93,82 +83,38 @@ func main() {
 		log.Fatal("No ouath token specified")
 	}
 
-	extractedSource := make(map[string]string)
-	for k, v := range settings.Packages {
-		v.Name = k
+	os.Mkdir("source", 0700)
+	os.Mkdir("cache", 0700)
+
+	cachedPackageSources := make(map[string]string)
+
+	source, err := ioutil.ReadFile(sourceCacheFile)
+	if err == nil {
+		fmt.Printf("Cache exists, using cached resources\n")
+		err = json.Unmarshal(source, &cachedPackageSources)
+		check(err)
 	}
 
-	source, err := ioutil.ReadFile(validSourcesPath)
-	if err != nil {
-
-		auth := oauth2.StaticTokenSource(
-			&oauth2.Token{AccessToken: settings.OauthToken},
-		)
-
-		type repoTuple struct {
-			Name string
-			Path string
-		}
-
-		os.Mkdir("source", 0700)
-		os.Mkdir("cache", 0700)
-
-		var sourcePaths []repoTuple
-		for k, v := range settings.Packages {
-
-			v.Name = k
-
-			u, err := url.Parse(v.Repository)
+	for _, v := range settings.Packages {
+		if _, ok := cachedPackageSources[v.Name]; !ok { // TODO add check to make sure that source/ actually has the files
+			fmt.Printf("[Missing %s] Downloading %s...", v.Name, v.Repository)
+			packageName, sourcePath, err := fetch(*v, settings.OauthToken)
 			check(err)
-
-			parts := strings.Split(u.Path[1:], "/")
-			if len(parts) != 2 {
-				log.Fatalf("Repository %s wasnt in the required https://github/owner/repo format", v.Repository)
-			}
-
-			fmt.Printf("Downloading %s (%s)...", k, v.Repository)
-			path, err := getLatestPackage(parts[0], parts[1], auth)
-			check(err)
-
-			sourcePaths = append(sourcePaths, repoTuple{k, path})
+			cachedPackageSources[packageName] = sourcePath
 			fmt.Printf("Done!\n")
 		}
-
-		fmt.Printf("Extracting archives...")
-		newDirectories := make(chan repoTuple)
-		for _, v := range sourcePaths {
-
-			go func(s repoTuple) {
-
-				r, err := os.Open(s.Path)
-				check(err)
-
-				outputDirect, err := ExtractTarGz(r)
-				check(err)
-
-				newDirectories <- repoTuple{s.Name, outputDirect}
-			}(v)
-		}
-
-		for i := 0; i < len(sourcePaths); i++ {
-			t := <-newDirectories
-			extractedSource[t.Name] = t.Path
-		}
-		close(newDirectories)
-
-		b, err := json.Marshal(extractedSource)
-		check(err)
-
-		err = ioutil.WriteFile(validSourcesPath, b, 0600)
-		check(err)
-
-		fmt.Printf("Done!\n")
-	} else {
-		fmt.Printf("It appears sources have already been downloaded using these instead (assuming they have been extracted)\n")
-		err = json.Unmarshal(source, &extractedSource)
-		check(err)
-		fmt.Println(extractedSource)
 	}
+
+	fmt.Printf("Extracting archives...")
+	cachedPackageSources, err = extractPackages(cachedPackageSources)
+	check(err)
+	fmt.Printf("Done!\n")
+
+	//Write package cache file
+	b, err := json.Marshal(cachedPackageSources)
+	check(err)
+	err = ioutil.WriteFile(sourceCacheFile, b, 0600)
+	check(err)
 
 	fmt.Printf("Creating build order...")
 	order, _ := createOrder(settings.Packages)
@@ -202,14 +148,62 @@ func main() {
 
 		fmt.Printf("\n%s\n", order[i].Name)
 		fmt.Printf("Configuration: %s\n", config)
-		fmt.Printf("Directory:     %s\n\n", extractedSource[order[i].Name])
-		cmd := exec.Command("bash", "-c", "cd "+extractedSource[order[i].Name]+"; "+actions)
+		fmt.Printf("Directory:     %s\n\n", cachedPackageSources[order[i].Name])
+		cmd := exec.Command("bash", "-c", "cd "+cachedPackageSources[order[i].Name]+"; "+actions)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err := cmd.Run()
 		check(err)
 	}
 
+}
+
+func extractPackages(archivePaths map[string]string) (extractedSourcesPaths map[string]string, err error) {
+	type pnameTopath struct {
+		Name string
+		Path string
+	}
+
+	extractedSourcesPaths = make(map[string]string)
+
+	newDirectories := make(chan pnameTopath)
+	defer close(newDirectories)
+	errorsChannel := make(chan error)
+	for k, v := range archivePaths {
+
+		go func(name, path string) {
+
+			if fsi, err := os.Stat(path); err == nil && fsi.IsDir() {
+				newDirectories <- pnameTopath{name, path}
+				return // Isnt a archive so dont extract
+			}
+
+			r, err := os.Open(path)
+			if err != nil {
+				errorsChannel <- err
+				return
+			}
+
+			outputDirect, err := ExtractTarGz(r)
+			if err != nil {
+				errorsChannel <- err
+				return
+			}
+
+			newDirectories <- pnameTopath{name, outputDirect}
+		}(k, v)
+	}
+
+	for i := 0; i < len(archivePaths); i++ {
+		select {
+		case t := <-newDirectories:
+			extractedSourcesPaths[t.Name] = t.Path
+		case m := <-errorsChannel:
+			return extractedSourcesPaths, m
+		}
+	}
+
+	return extractedSourcesPaths, nil
 }
 
 func ExtractTarGz(gzipStream io.Reader) (outputDirectory string, err error) {
@@ -267,91 +261,4 @@ func ExtractTarGz(gzipStream io.Reader) (outputDirectory string, err error) {
 
 	}
 	return outputDirectory, nil
-}
-
-func getLatestPackage(owner, name string, oAuth oauth2.TokenSource) (string, error) {
-
-	httpClient := oauth2.NewClient(context.Background(), oAuth)
-
-	client := githubv4.NewClient(httpClient)
-
-	var query struct {
-		Repository struct {
-			Description string
-			Refs        struct {
-				Edges []struct {
-					Node struct {
-						Target struct {
-							CommitResourcePath githubv4.URI
-							Tag                struct {
-								Name string
-							} `graphql:"... on Tag"`
-						}
-					}
-				}
-			} `graphql:"refs(refPrefix: \"refs/tags/\", last: 1, orderBy: {field: TAG_COMMIT_DATE, direction: ASC})"`
-		} `graphql:"repository(owner: $repoOwner, name: $repoName)"`
-	}
-
-	variables := map[string]interface{}{
-		"repoOwner": githubv4.String(owner),
-		"repoName":  githubv4.String(name),
-	}
-
-	err := client.Query(context.Background(), &query, variables)
-	if err != nil {
-		return "", err
-	}
-
-	if len(query.Repository.Refs.Edges) != 1 {
-		return "", fmt.Errorf("Unable to request tags")
-	}
-
-	pkgName := path.Base(query.Repository.Refs.Edges[0].Node.Target.Tag.Name)
-	commitHash := path.Base(query.Repository.Refs.Edges[0].Node.Target.CommitResourcePath.Path)
-
-	outputFile := "./source/" + name + "-" + pkgName + ".tar.gz"
-
-	err = DownloadFile(outputFile, fmt.Sprintf("https://github.com/%s/%s/archive/%s.tar.gz", owner, name, commitHash))
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Abs(outputFile)
-}
-
-func DownloadFile(filepath string, url string) error {
-
-	resp, err := http.Head(url)
-	if err != nil {
-		return err
-	}
-	etag := resp.Header.Get("ETag") //This is for storing/retrieving etag values for caching purposes
-
-	hash := sha1.Sum([]byte(url))
-	v := hex.EncodeToString(hash[:])
-
-	contents, err := ioutil.ReadFile("cache/" + v)
-	if err == nil && string(contents) == etag {
-		return nil
-	}
-
-	resp, err = http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	out, err := os.Create(filepath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	// Write the body to file
-	_, err = io.Copy(out, resp.Body)
-
-	ioutil.WriteFile("cache/"+v, []byte(etag), 0600)
-
-	return err
 }
