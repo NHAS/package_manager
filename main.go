@@ -30,7 +30,8 @@ type Package struct {
 	Repository           string   `json:"repo"`
 	ConfigurationOptions string   `json:"configure_opts"`
 	Depends              []string `json:"depends"`
-	Install              bool     `json:"install"`
+	Install              string   `json:"install"`
+	Build                string   `json:"build"`
 }
 
 type Management struct {
@@ -159,9 +160,15 @@ func main() {
 		}
 
 		if build {
-			actions += "make -j " + strconv.Itoa(runtime.NumCPU())
-			if order[i].Install {
-				actions += " && make install; "
+			buildInstruction := "make -j " + strconv.Itoa(runtime.NumCPU())
+			if len(order[i].Build) != 0 {
+				buildInstruction = order[i].Build
+			}
+
+			actions += buildInstruction
+
+			if len(order[i].Install) != 0 {
+				actions += " && " + order[i].Install
 			}
 		}
 
