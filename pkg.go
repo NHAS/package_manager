@@ -20,6 +20,7 @@ type Image struct {
 	CrossCompilerLibRoot string   `json:"cross_compiler_lib_root"`
 	KeyExecutables       []string `json:"executables"`
 	LdSearch             []string `json:"ld_library_paths"`
+	Configuration        string   `json:"image_config"`
 }
 
 type pkgManifest struct {

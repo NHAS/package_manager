@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -257,6 +256,11 @@ func createImage(settings pkgManifest) error {
 		return nil
 	})
 
+	if len(settings.ImageSettings.Configuration) != 0 {
+		err := CopyDirectory(settings.ImageSettings.Configuration, "image/")
+		check(err)
+	}
+
 	squash := exec.Command("mksquashfs", "image", "image.sqfs", "-comp", "xz", "-noappend", "-no-xattrs", "-all-root", "-progress", "-always-use-fragments", "-no-exports")
 	squash.Stdout = os.Stdout
 	squash.Stderr = os.Stderr
@@ -297,33 +301,6 @@ func getDependacies(crossCompile, binaryFile string) (deps []string, err error) 
 	return deps, nil
 }
 
-func copyFile(src, dst string) (int64, error) {
-	sourceFileStat, err := os.Stat(src)
-	if err != nil {
-		return 0, err
-	}
-
-	if !sourceFileStat.Mode().IsRegular() {
-		return 0, fmt.Errorf("%s is not a regular file", src)
-	}
-
-	source, err := os.Open(src)
-	if err != nil {
-		return 0, err
-	}
-	defer source.Close()
-
-	file := filepath.Base(src)
-
-	destination, err := os.OpenFile(filepath.Join(dst, file), os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0700)
-	if err != nil {
-		return 0, err
-	}
-	defer destination.Close()
-	nBytes, err := io.Copy(destination, source)
-	return nBytes, err
-}
-
 func configureAndBuild(packages []*Package, buildOptions Bits) error {
 
 	if !directoryExists("build") && os.Mkdir("build", 0700) != nil {
@@ -341,7 +318,7 @@ func configureAndBuild(packages []*Package, buildOptions Bits) error {
 		actions := ""
 
 		if buildOptions.Has(CONFIGURE) {
-			actions += order[i].ConfigurationOptions
+			actions += order[i].ConfigurationOptions + " && make clean"
 		}
 
 		if buildOptions.Has(CONFIGURE) && buildOptions.Has(BUILD) {
