@@ -1,26 +1,40 @@
 {
-	"oauth_token": "<GITHUB OAUTH Public repo read token>",
+	"oauth_token": "<YOUR GITHUB KEY HERE>",
+	"cross_compiler": "arm-unknown-linux-gnueabi",
 	"replacements": {
-		"build_dir": "build",
-		"cross_compiler": "arm-unknown-linux-gnueabi",
+		"build_dir": "/home/username/openssh/build",
 		"ld_loc": "/tmp/root/lib"
 	},
-	"packages": {
-		"openssl": {
+	"packages": [
+		{
+			"name":"openssl",
 			"repo":"https://github.com/openssl/openssl",
 			"configure_opts": "CROSS_COMPILE=$cross_compiler$- ./Configure -DL_ENDIAN --prefix=$build_dir$ linux-armv4",
-			"install": true
+			"install": "make -j 32 install"
 		},
-		"openssh": {
-			
+	 	{
+		 	"name":"openssh",
 			"repo":"https://github.com/openssh/openssh-portable",
-			"configure_opts": "autoreconf; LDFLAGS='-Wl,--rpath=$ld_loc$ -Wl,--dynamic-linker=$ld_loc$/ld-linux.so.3' ./configure --host=$cross_compiler$ --with-ssl-dir=$build_dir$ --with-zlib=$build_dir$",
-			"depends": ["openssl", "zlib"]
-		},		
-		"zlib": {
+			"configure_opts": "autoreconf; LDFLAGS='-Wl,--rpath=$ld_loc$ -Wl,--dynamic-linker=$ld_loc$/ld-linux.so.3' ./configure --disable-strip --host=$cross_compiler$ --prefix=$build_dir$ --with-ssl-dir=$build_dir$ --with-zlib=$build_dir$",
+			"depends": ["openssl", "zlib"],
+			"install": "make install-files"
+		},
+		{
+			"name":"zlib",
 			"repo":"https://github.com/madler/zlib",
 			"configure_opts": "CC=$cross_compiler$-gcc ./configure --prefix=$build_dir$",
-			"install": true
+			"install": "make -j 32 install"
 		}
+	],
+	"image_settings": {
+		"cross_compiler_lib_root": "/home/username/x-tools/arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot/lib",
+		"executables": [
+			"sbin/sshd",
+			"bin/ssh",
+			"bin/ssh-keygen"
+		],
+		"ld_library_paths":[
+			"build/lib"
+		]
 	}
 }
