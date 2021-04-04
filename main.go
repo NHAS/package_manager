@@ -246,6 +246,17 @@ func createImage(settings pkgManifest) error {
 		}
 	}
 
+	filepath.Walk("image", func(path string, info os.FileInfo, err error) error {
+		if info.Mode().IsRegular() {
+			err := exec.Command(settings.CrossCompiler+"-strip", path).Run()
+			if err != nil {
+				log.Println("Could not strip ", path, " err: ", err)
+			}
+		}
+
+		return nil
+	})
+
 	squash := exec.Command("mksquashfs", "image", "image.sqfs", "-comp", "xz", "-noappend", "-no-xattrs", "-all-root", "-progress", "-always-use-fragments", "-no-exports")
 	squash.Stdout = os.Stdout
 	squash.Stderr = os.Stderr
