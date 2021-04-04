@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -115,7 +118,8 @@ func main() {
 	}
 
 	if buildOptions.Has(IMAGE) {
-		createImage(settings)
+		err := createImage(settings)
+		check(err)
 	}
 
 }
@@ -127,23 +131,193 @@ func clean() {
 	os.RemoveAll("image/")
 }
 
-func createImage(settings pkgManifest) {
-	if fs, err := os.Stat(settings.CrossCompileLib); err != nil || !fs.IsDir() {
-		log.Fatalf("Invalid cross compiler lib [%s]", settings.CrossCompileLib)
+func createImage(settings pkgManifest) error {
+
+	for _, v := range settings.ImageSettings.LdSearch {
+		if fs, err := os.Stat(v); err != nil || !fs.IsDir() {
+			return fmt.Errorf("Invalid library search path [%s] %s", v, err)
+		}
 	}
 
-	if len(settings.KeyExecutables) == 0 && len(settings.KeyLibraries) == 0 {
-		log.Println("[WARN] No key executables or libraries are selected this may be bigger images by including unused libraries")
+	if !directoryExists("image") && os.Mkdir("image", 0700) != nil {
+		return fmt.Errorf("Unable to make image directory for creating squash")
 	}
 
-	if os.Mkdir("image", 0600) != nil {
-		log.Fatal("Unable to make image directory for creating squash")
+	if len(settings.ImageSettings.KeyExecutables) == 0 {
+		return fmt.Errorf("No executables marked for packaging")
 	}
+
+	files := []string{}
+	for _, v := range settings.ImageSettings.KeyExecutables {
+		matches, err := filepath.Glob(filepath.Join("build/", v))
+		if err != nil {
+			return err
+		}
+		for _, vv := range matches {
+			if fs, err := os.Stat(vv); err != nil || fs.IsDir() {
+				log.Printf("[WARN] Not adding %s \n", vv)
+				continue
+			}
+
+			files = append(files, vv)
+		}
+	}
+
+	if _, err := os.Stat(settings.ImageSettings.CrossCompilerLibRoot); err != nil {
+		return err
+	}
+
+	os.Mkdir("image/lib", 0700)
+
+	settings.ImageSettings.LdSearch = append(settings.ImageSettings.LdSearch, settings.ImageSettings.CrossCompilerLibRoot)
+
+	// Copy all selected binary files, and their required dynamic libraries. As given by objdump
+	executableDependances := make(map[string]bool)
+	for _, binaryFile := range files {
+		deps, err := getDependacies(settings.CrossCompiler, binaryFile)
+		if err != nil {
+			log.Println("[WARN] Skipping file as objdump complained: ", binaryFile, " Err: ", err)
+			continue
+		}
+
+		for _, dependancy := range deps {
+			if _, ok := executableDependances[dependancy]; ok {
+				continue
+			}
+
+			libraryPath, err := findLibrary(dependancy, settings.ImageSettings.LdSearch)
+			if err != nil {
+				return err
+			}
+
+			_, err = copyFile(libraryPath, "image/lib/")
+			if err != nil {
+				return err
+			}
+
+			executableDependances[dependancy] = true
+
+			log.Println("Adding library: ", dependancy)
+
+		}
+
+		realitivePath, err := filepath.Rel("build/", binaryFile)
+		if err != nil {
+			return err
+		}
+		imageDirectory := filepath.Dir(filepath.Join("image/", realitivePath))
+		os.MkdirAll(imageDirectory, 0700)
+
+		_, err = copyFile(binaryFile, imageDirectory)
+		if err != nil {
+			return err
+		}
+	}
+
+	for k := range executableDependances {
+
+		libraryPath, err := findLibrary(k, settings.ImageSettings.LdSearch)
+		if err != nil {
+			return err
+		}
+
+		deps, err := getDependacies(settings.CrossCompiler, libraryPath)
+		if err != nil {
+			log.Printf("Getting dependancy of library %s failed %s", k, err)
+			continue
+		}
+
+		for _, v := range deps {
+			if _, ok := executableDependances[v]; !ok {
+				libraryPath, err := findLibrary(v, settings.ImageSettings.LdSearch)
+				if err != nil {
+					return err
+				}
+
+				_, err = copyFile(libraryPath, "image/lib/")
+				if err != nil {
+					return err
+				}
+
+				executableDependances[v] = true
+				log.Println("Adding library: ", v)
+
+			}
+		}
+	}
+
+	squash := exec.Command("mksquashfs", "image", "image.sqfs", "-comp", "xz", "-noappend", "-no-xattrs", "-all-root", "-progress", "-always-use-fragments", "-no-exports")
+	squash.Stdout = os.Stdout
+	squash.Stderr = os.Stderr
+
+	return squash.Run()
+}
+
+func findLibrary(library string, searchPaths []string) (libraryPath string, err error) {
+
+	for _, searchPath := range searchPaths {
+		_, err := os.Stat(filepath.Join(searchPath, library))
+		if err == nil {
+			return filepath.Join(searchPath, library), nil
+		}
+	}
+
+	return libraryPath, fmt.Errorf("Unable to find %s in ld_library_paths", library)
+
+}
+
+func getDependacies(crossCompile, binaryFile string) (deps []string, err error) {
+	cmd := exec.Command(crossCompile+"-objdump", "-p", binaryFile)
+	objDmpOut, err := cmd.Output()
+	if err != nil {
+		log.Println(objDmpOut)
+		return deps, err
+	}
+
+	for _, objDumpLines := range bytes.Split(objDmpOut, []byte{'\n'}) {
+		if bytes.Contains(objDumpLines, []byte("NEEDED")) {
+			l := bytes.ReplaceAll(objDumpLines, []byte("NEEDED"), []byte(""))
+			l = bytes.TrimSpace(l)
+
+			deps = append(deps, string(l))
+		}
+	}
+
+	return deps, nil
+}
+
+func copyFile(src, dst string) (int64, error) {
+	sourceFileStat, err := os.Stat(src)
+	if err != nil {
+		return 0, err
+	}
+
+	if !sourceFileStat.Mode().IsRegular() {
+		return 0, fmt.Errorf("%s is not a regular file", src)
+	}
+
+	source, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer source.Close()
+
+	file := filepath.Base(src)
+
+	destination, err := os.OpenFile(filepath.Join(dst, file), os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0700)
+	if err != nil {
+		return 0, err
+	}
+	defer destination.Close()
+	nBytes, err := io.Copy(destination, source)
+	return nBytes, err
 }
 
 func configureAndBuild(packages []*Package, buildOptions Bits) error {
 
-	os.Mkdir("build", 0700)
+	if !directoryExists("build") && os.Mkdir("build", 0700) != nil {
+		return fmt.Errorf("Unable to make build directory")
+	}
 
 	fmt.Printf("Creating build order...")
 	order, _ := createOrder(packages)

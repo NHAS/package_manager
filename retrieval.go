@@ -24,14 +24,26 @@ import (
 
 const sourceCacheFile = "./source/valid_sources"
 
+func directoryExists(path string) bool {
+	if fs, err := os.Stat(path); err != nil || !fs.IsDir() {
+		return false
+	}
+	return true
+}
+
 func pullPackages(oauth string, packages []*Package) error {
 
 	if len(oauth) == 0 {
 		return fmt.Errorf("No ouath token specified")
 	}
 
-	os.Mkdir("source", 0700)
-	os.Mkdir("cache", 0700)
+	if !directoryExists("source") && os.Mkdir("source", 0700) != nil {
+		return fmt.Errorf("Unable to make source directory")
+	}
+
+	if !directoryExists("cache") && os.Mkdir("cache", 0700) != nil {
+		return fmt.Errorf("Unable to make cache directory")
+	}
 
 	cachedPackageSources := make(map[string]string)
 

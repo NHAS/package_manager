@@ -16,14 +16,18 @@ type Package struct {
 	Build                string   `json:"build"`
 }
 
+type Image struct {
+	CrossCompilerLibRoot string   `json:"cross_compiler_lib_root"`
+	KeyExecutables       []string `json:"executables"`
+	LdSearch             []string `json:"ld_library_paths"`
+}
+
 type pkgManifest struct {
-	Replacements    map[string]string `json:"replacements"`
-	OauthToken      string            `json:"oauth_token"`
-	Packages        []*Package        `json:"packages"`
-	CrossCompiler   string            `json:"cross_compiler"`
-	CrossCompileLib string            `json:"cross_compiler_sysroot_lib"`
-	KeyExecutables  []string          `json:"executables"`
-	KeyLibraries    []string          `json:"libraries"`
+	Replacements  map[string]string `json:"replacements"`
+	OauthToken    string            `json:"oauth_token"`
+	Packages      []*Package        `json:"packages"`
+	CrossCompiler string            `json:"cross_compiler"`
+	ImageSettings Image             `json:"image_settings"`
 }
 
 func loadPackageManifest(path string) (settings pkgManifest, err error) {
