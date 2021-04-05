@@ -45,6 +45,7 @@ const (
 	CONFIGURE
 	BUILD
 	IMAGE
+	QUIET
 )
 
 func main() {
@@ -53,6 +54,7 @@ func main() {
 	flag.Bool("build", false, "Just build, dont reconfigure the package")
 	flag.Bool("image", false, "Just create image from build directory")
 	flag.Bool("clean", false, "Delete everything and start again")
+	flag.Bool("quiet", false, "Dont print build & configure output")
 
 	flag.Parse()
 
@@ -67,6 +69,8 @@ func main() {
 			buildOptions.Set(BUILD)
 		case "clean":
 			buildOptions.ExclSet(CLEAN) // Clear all other flags and set this one
+		case "quiet":
+			buildOptions.Set(QUIET)
 		}
 	})
 
@@ -342,8 +346,10 @@ func configureAndBuild(packages []*Package, buildOptions Bits) error {
 		fmt.Printf("Configuration: %s\n", order[i].ConfigurationOptions)
 		fmt.Printf("Directory:     %s\n\n", order[i].Source)
 		cmd := exec.Command("bash", "-c", "cd "+order[i].Source+"; "+actions)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		if !buildOptions.Has(QUIET) {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
 		err := cmd.Run()
 		if err != nil {
 			return err
