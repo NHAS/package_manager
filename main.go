@@ -367,7 +367,8 @@ func configureAndBuild(packages []*Package, buildOptions Bits) error {
 
 					err = cmd.Run()
 					if err != nil {
-						return err
+						fmt.Printf("Failed!\n")
+						continue
 					}
 					fmt.Printf("Done!\n")
 
