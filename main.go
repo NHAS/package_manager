@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -319,14 +320,60 @@ func configureAndBuild(packages []*Package, buildOptions Bits) error {
 
 	for i := range order {
 
-		actions := ""
+		fmt.Printf("\n%s\n", order[i].Name)
+		fmt.Printf("Configuration:  %s\n", order[i].ConfigurationOptions)
+		fmt.Printf("Patches:       '%s'\n", order[i].Patches)
+		fmt.Printf("Install:       '%s'\n", order[i].Install)
+		fmt.Printf("Directory:     '%s'\n\n", order[i].Source)
 
 		if buildOptions.Has(CONFIGURE) {
-			actions += order[i].ConfigurationOptions + " && make clean"
+			actions := order[i].ConfigurationOptions + " && make clean"
+
+			cmd := exec.Command("bash", "-c", "cd "+order[i].Source+"; "+actions)
+
+			if !buildOptions.Has(QUIET) {
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+			}
+
+			err := cmd.Run()
+			if err != nil {
+				return err
+			}
 		}
 
-		if buildOptions.Has(CONFIGURE) && buildOptions.Has(BUILD) {
-			actions += " && "
+		if len(order[i].Patches) != 0 {
+			fmt.Printf("Package [%s] has patches, applying them:\n", order[i].Name)
+
+			if !directoryExists(order[i].Patches) {
+				return fmt.Errorf("Patches directory doesnt exist: %s", order[i].Patches)
+			}
+
+			dirList, err := os.ReadDir(order[i].Patches)
+			if err != nil {
+				return err
+			}
+			for _, file := range dirList {
+				if file.Type().IsRegular() && filepath.Ext(file.Name()) == ".patch" {
+					patchPath, err := filepath.Abs(path.Join(order[i].Patches, file.Name()))
+					if err != nil {
+						return err
+					}
+
+					fmt.Printf("Applying [%s]...", patchPath)
+					cmd := exec.Command("patch", "-p0", "-d", order[i].Source, "-i", patchPath)
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+
+					err = cmd.Run()
+					if err != nil {
+						return err
+					}
+					fmt.Printf("Done!\n")
+
+				}
+			}
+
 		}
 
 		if buildOptions.Has(BUILD) {
@@ -335,25 +382,22 @@ func configureAndBuild(packages []*Package, buildOptions Bits) error {
 				buildInstruction = order[i].Build
 			}
 
-			actions += buildInstruction
-
 			if len(order[i].Install) != 0 {
-				actions += " && " + order[i].Install
+				buildInstruction += " && " + order[i].Install
+			}
+
+			cmd := exec.Command("bash", "-c", "cd "+order[i].Source+"; "+buildInstruction)
+			if !buildOptions.Has(QUIET) {
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+			}
+
+			err := cmd.Run()
+			if err != nil {
+				return err
 			}
 		}
 
-		fmt.Printf("\n%s\n", order[i].Name)
-		fmt.Printf("Configuration: %s\n", order[i].ConfigurationOptions)
-		fmt.Printf("Directory:     %s\n\n", order[i].Source)
-		cmd := exec.Command("bash", "-c", "cd "+order[i].Source+"; "+actions)
-		if !buildOptions.Has(QUIET) {
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-		}
-		err := cmd.Run()
-		if err != nil {
-			return err
-		}
 	}
 
 	return nil

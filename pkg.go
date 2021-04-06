@@ -14,6 +14,7 @@ type Package struct {
 	Depends              []string `json:"depends"`
 	Install              string   `json:"install"`
 	Build                string   `json:"build"`
+	Patches              string   `json:"patches"`
 }
 
 type Image struct {
