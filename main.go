@@ -361,7 +361,7 @@ func configureAndBuild(packages []*Package, buildOptions Bits) error {
 					}
 
 					fmt.Printf("Applying [%s]...", patchPath)
-					cmd := exec.Command("patch", "-p0", "-d", order[i].Source, "-i", patchPath)
+					cmd := exec.Command("patch", "-f", "-p0", "-d", order[i].Source, "-i", patchPath)
 					cmd.Stdout = os.Stdout
 					cmd.Stderr = os.Stderr
 
