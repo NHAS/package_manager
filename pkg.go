@@ -18,6 +18,7 @@ type Package struct {
 }
 
 type Image struct {
+	Filename             string   `json:"image_name"`
 	CrossCompilerLibRoot string   `json:"cross_compiler_lib_root"`
 	KeyExecutables       []string `json:"executables"`
 	LdSearch             []string `json:"ld_library_paths"`

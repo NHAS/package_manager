@@ -266,7 +266,11 @@ func createImage(settings pkgManifest) error {
 		check(err)
 	}
 
-	squash := exec.Command("mksquashfs", "image", "image.sqfs", "-comp", "xz", "-noappend", "-no-xattrs", "-all-root", "-progress", "-always-use-fragments", "-no-exports")
+	if settings.ImageSettings.Filename == "" {
+		return fmt.Errorf("Image filename not set")
+	}
+
+	squash := exec.Command("mksquashfs", "image", settings.ImageSettings.Filename, "-comp", "xz", "-noappend", "-no-xattrs", "-all-root", "-progress", "-always-use-fragments", "-no-exports")
 	squash.Stdout = os.Stdout
 	squash.Stderr = os.Stderr
 
