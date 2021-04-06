@@ -1,8 +1,8 @@
 {
-	"oauth_token": "<YOUR GITHUB KEY HERE>",
+	"oauth_token": "<YOUR GITHUB OAUTH TOKEN>",
 	"cross_compiler": "arm-unknown-linux-gnueabi",
 	"replacements": {
-		"build_dir": "/home/username/openssh/build",
+		"build_dir": "/home/uname/Documents/RouterReversing/tools/openssh/build",
 		"ld_loc": "/tmp/root/lib"
 	},
 	"packages": [
@@ -17,7 +17,8 @@
 			"repo":"https://github.com/openssh/openssh-portable",
 			"configure_opts": "autoreconf; LDFLAGS='-Wl,--rpath=$ld_loc$ -Wl,--dynamic-linker=$ld_loc$/ld-linux.so.3' ./configure --disable-strip --host=$cross_compiler$ --prefix=$build_dir$ --with-ssl-dir=$build_dir$ --with-zlib=$build_dir$",
 			"depends": ["openssl", "zlib"],
-			"install": "make install-files"
+			"install": "make install-files",
+			"patches":"patches/openssh"
 		},
 		{
 			"name":"zlib",
@@ -27,11 +28,14 @@
 		}
 	],
 	"image_settings": {
-		"cross_compiler_lib_root": "/home/username/x-tools/arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot/lib",
+		"image_name":"debug.sqfs",
+		"image_config":"image_config",
+		"cross_compiler_lib_root": "/home/uname/x-tools/arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot/lib",
 		"executables": [
 			"sbin/sshd",
 			"bin/ssh",
-			"bin/ssh-keygen"
+			"bin/ssh-keygen",
+			"bin/scp"
 		],
 		"ld_library_paths":[
 			"build/lib"
