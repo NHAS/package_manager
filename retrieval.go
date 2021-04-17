@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/shurcooL/githubv4"
@@ -103,7 +104,7 @@ func fetch(p Package, oauthToken string) (Path string, err error) {
 
 	u, err := url.Parse(p.Repository)
 	if err != nil {
-		return "", err
+		return
 	}
 
 	parts := strings.Split(u.Path[1:], "/")
@@ -111,15 +112,25 @@ func fetch(p Package, oauthToken string) (Path string, err error) {
 		return "", fmt.Errorf("Repository %s wasnt in the required https://github/owner/repo format", p.Repository)
 	}
 
-	path, err := getLatestPackage(parts[0], parts[1], auth)
+	//parts[0] = owner
+	//parts[1] = repo/pkg name
+
+	tagName, commitHash, err := getLatestPackage(parts[0], parts[1], p.ValidTagRegex, auth)
 	if err != nil {
-		return "", err
+		return
 	}
 
-	return path, nil
+	outputFile := "./source/" + parts[1] + "-" + tagName + ".tar.gz"
+
+	err = downloadFile(outputFile, fmt.Sprintf("https://github.com/%s/%s/archive/%s.tar.gz", parts[0], parts[1], commitHash))
+	if err != nil {
+		return
+	}
+
+	return filepath.Abs(outputFile)
 }
 
-func getLatestPackage(owner, name string, oAuth oauth2.TokenSource) (string, error) {
+func getLatestPackage(owner, name, regex string, oAuth oauth2.TokenSource) (tagName string, commitHash string, err error) {
 
 	httpClient := oauth2.NewClient(context.Background(), oAuth)
 
@@ -139,35 +150,56 @@ func getLatestPackage(owner, name string, oAuth oauth2.TokenSource) (string, err
 						}
 					}
 				}
-			} `graphql:"refs(refPrefix: \"refs/tags/\", last: 1, orderBy: {field: TAG_COMMIT_DATE, direction: ASC})"`
+			} `graphql:"refs(refPrefix: \"refs/tags/\", last: $number, orderBy: {field: TAG_COMMIT_DATE, direction: ASC})"`
 		} `graphql:"repository(owner: $repoOwner, name: $repoName)"`
+	}
+
+	last := 1
+	if len(regex) != 0 {
+		last = 10
 	}
 
 	variables := map[string]interface{}{
 		"repoOwner": githubv4.String(owner),
 		"repoName":  githubv4.String(name),
+		"number":    githubv4.Int(last),
 	}
 
-	err := client.Query(context.Background(), &query, variables)
+	err = client.Query(context.Background(), &query, variables)
 	if err != nil {
-		return "", err
+		return
 	}
 
-	if len(query.Repository.Refs.Edges) != 1 {
-		return "", fmt.Errorf("Unable to request tags")
+	if len(query.Repository.Refs.Edges) < 1 {
+		err = fmt.Errorf("Unable to request tags")
+		return
 	}
 
-	pkgName := path.Base(query.Repository.Refs.Edges[0].Node.Target.Tag.Name)
-	commitHash := path.Base(query.Repository.Refs.Edges[0].Node.Target.CommitResourcePath.Path)
+	if len(regex) == 0 {
+		tagName = path.Base(query.Repository.Refs.Edges[0].Node.Target.Tag.Name)
+		commitHash = path.Base(query.Repository.Refs.Edges[0].Node.Target.CommitResourcePath.Path)
+		return
+	}
 
-	outputFile := "./source/" + name + "-" + pkgName + ".tar.gz"
-
-	err = downloadFile(outputFile, fmt.Sprintf("https://github.com/%s/%s/archive/%s.tar.gz", owner, name, commitHash))
+	reg, err := regexp.Compile(regex)
 	if err != nil {
-		return "", err
+		return
 	}
 
-	return filepath.Abs(outputFile)
+	//As the graphql library we're using cant do DESC without panicking like ffs
+	for i := len(query.Repository.Refs.Edges) - 1; i > 0; i-- {
+		v := query.Repository.Refs.Edges[i]
+
+		if reg.MatchString(v.Node.Target.Tag.Name) {
+			tagName = path.Base(v.Node.Target.Tag.Name)
+			commitHash = path.Base(v.Node.Target.CommitResourcePath.Path)
+
+			return
+		}
+	}
+
+	err = fmt.Errorf("No matches found for regex: '%s'", regex)
+	return
 }
 
 func downloadFile(filepath string, url string) error {

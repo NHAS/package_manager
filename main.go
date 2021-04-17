@@ -263,8 +263,30 @@ func createImage(settings pkgManifest) error {
 
 	if len(settings.ImageSettings.Configuration) != 0 {
 		err := CopyDirectory(settings.ImageSettings.Configuration, "image/")
+
+		if fs, err := os.Stat("image/init.sh"); err != nil || fs.IsDir() {
+			log.Println("[WARN] init.sh not found in image")
+		}
+
+		if fs, err := os.Stat("image/postup.sh"); err != nil || fs.IsDir() {
+			log.Println("[WARN] postup.sh not found in image")
+		}
+
 		check(err)
 	}
+
+	log.Println("Copying build tokens...")
+	_, err := copyFile(sourceCacheFile, "image/")
+	if err != nil {
+		return fmt.Errorf("Unable to copy git package commits: %s", err)
+	}
+
+	_, err = copyFile(flag.Args()[0], "image/")
+	if err != nil {
+		return fmt.Errorf("Unable to copy pkg file: %s", err)
+	}
+
+	log.Println("Done!")
 
 	if settings.ImageSettings.Filename == "" {
 		return fmt.Errorf("Image filename not set")

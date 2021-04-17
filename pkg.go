@@ -9,6 +9,7 @@ import (
 type Package struct {
 	Name                 string
 	Repository           string   `json:"repo"`
+	ValidTagRegex        string   `json:"tag_regex"`
 	Source               string   `json:"source_directory"`
 	ConfigurationOptions string   `json:"configure_opts"`
 	Depends              []string `json:"depends"`
